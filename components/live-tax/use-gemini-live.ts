@@ -29,6 +29,8 @@ type ServerMessage =
 
 const AUDIO_SAMPLE_RATE = 16_000;
 const PLAYBACK_SAMPLE_RATE = 24_000;
+const INTERRUPT_RMS_THRESHOLD = 0.018;
+const INTERRUPT_DEBOUNCE_MS = 900;
 const SYSTEM_INSTRUCTION = `You are LiveTax Agent, a calm voice-first tax copilot helping the user complete IRS Form 1040.
 
 The user sees a live tax form workspace on the right side of the screen. You may also receive uploaded W-2 images or PDFs, plus live visual updates from the current app tab. Use those visual inputs as real evidence for what is on screen.
@@ -43,6 +45,7 @@ Voice style:
 Document handling:
 - When a W-2, tax image, or PDF is uploaded, inspect it carefully before answering.
 - On the first pass, prioritize exact extraction over speed.
+- When a new document arrives, continue the current conversation naturally. Do not reintroduce yourself, restart the flow, or repeat your opening script.
 - For a W-2, pay special attention to employer name, employee name, box 1 wages, box 2 federal income tax withheld, box 16 state wages, and box 17 state income tax.
 - If a value is blurry, cut off, obstructed, or uncertain, say exactly which field is uncertain and ask for a clearer or steadier view.
 - Never guess a tax value.
@@ -58,7 +61,9 @@ Behavior:
 - Help the user understand whether a value or edit looks correct.
 - Do not give legal certainty or claim professional tax advice.
 - If the user types in chat, you can reply in text. Otherwise optimize for spoken guidance.`;
-const DOCUMENT_UPLOAD_INSTRUCTION = `Carefully inspect this uploaded tax document before responding.
+const DOCUMENT_UPLOAD_INSTRUCTION = `Continue the current conversation naturally. Do not reintroduce yourself or restart the filing script.
+
+Carefully inspect this uploaded tax document before responding.
 
 This may be a W-2 image or PDF. On the first pass, extract the important visible tax values carefully and do not guess.
 
@@ -71,7 +76,7 @@ If this is a W-2, prioritize:
 - box 17 state income tax
 
 If any important value is unclear, say which field is unclear instead of making one up.
-Use this document as evidence in the current tax-filing conversation.`;
+After inspecting it, briefly acknowledge what you found and continue helping with the current tax-filing task.`;
 const VIDEO_FRAME_INTERVAL_MS = 1200;
 
 type MessageAttributes = Record<string, string>;
@@ -141,6 +146,21 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
+function calculatePcmRms(bytes: Uint8Array) {
+  const samples = new Int16Array(bytes.buffer);
+  if (!samples.length) {
+    return 0;
+  }
+
+  let sum = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const normalized = samples[i] / 32768;
+    sum += normalized * normalized;
+  }
+
+  return Math.sqrt(sum / samples.length);
+}
+
 function base64ToUint8(base64: string) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -190,6 +210,8 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
   const outputMessageIdRef = useRef<string | null>(null);
   const microphoneAutostartedRef = useRef(false);
   const visibleAssistantTurnRef = useRef(false);
+  const agentStateRef = useRef<AgentState>("connecting");
+  const lastInterruptAtRef = useRef(0);
 
   const log = useCallback((entry: string) => {
     setDebugLog((current) =>
@@ -243,6 +265,35 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       log("audio playback decode failed");
     }
   }, [log]);
+
+  const clearPlaybackQueue = useCallback(() => {
+    const ctx = playbackContextRef.current;
+    if (ctx) {
+      try {
+        void ctx.suspend();
+      } catch {
+        // ignore
+      }
+      void ctx.close().catch(() => undefined);
+    }
+    playbackContextRef.current = null;
+    nextStartTimeRef.current = 0;
+  }, []);
+
+  const interruptAssistant = useCallback(() => {
+    const now = Date.now();
+    if (now - lastInterruptAtRef.current < INTERRUPT_DEBOUNCE_MS) {
+      return;
+    }
+
+    lastInterruptAtRef.current = now;
+    clearPlaybackQueue();
+    outputMessageIdRef.current = null;
+    visibleAssistantTurnRef.current = false;
+    setAgentState("listening");
+    send({ type: "input.interrupt" });
+    log("interrupt sent");
+  }, [clearPlaybackQueue, log, send]);
 
   const handleServerMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
@@ -320,6 +371,10 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
   }, [log, scheduleAudioChunk, send]);
 
   useEffect(() => {
+    agentStateRef.current = agentState;
+  }, [agentState]);
+
+  useEffect(() => {
     const socket = new WebSocket(wsUrl);
     wsRef.current = socket;
     setAgentState("connecting");
@@ -364,12 +419,12 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       audioContextRef.current?.close().catch(() => undefined);
-      playbackContextRef.current?.close().catch(() => undefined);
+      clearPlaybackQueue();
       if (frameIntervalRef.current !== null) {
         window.clearInterval(frameIntervalRef.current);
       }
     };
-  }, [handleServerMessage, log, send, wsUrl]);
+  }, [clearPlaybackQueue, handleServerMessage, log, send, wsUrl]);
 
   const sendText = useCallback((text: string) => {
     if (!text.trim()) {
@@ -457,9 +512,16 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       const workletNode = new AudioWorkletNode(ctx, "pcm-processor");
       workletNodeRef.current = workletNode;
       workletNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+        const bytes = new Uint8Array(event.data);
+        const rms = calculatePcmRms(bytes);
+
+        if (agentStateRef.current === "speaking" && rms >= INTERRUPT_RMS_THRESHOLD) {
+          interruptAssistant();
+        }
+
         send({
           type: "input.audio",
-          audio: bytesToBase64(new Uint8Array(event.data))
+          audio: bytesToBase64(bytes)
         });
       };
 
@@ -472,7 +534,7 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       setError("Failed to start microphone capture.");
       log("microphone start failed");
     }
-  }, [log, microphoneEnabled, send]);
+  }, [interruptAssistant, log, microphoneEnabled, send]);
 
   useEffect(() => {
     if (!connected || microphoneEnabled || microphoneAutostartedRef.current) {

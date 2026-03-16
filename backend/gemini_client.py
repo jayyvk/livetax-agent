@@ -106,7 +106,7 @@ async def run_gemini_session(websocket: Any, config: dict[str, Any]) -> None:
                                     types.Part(
                                         text=message.get(
                                             "text",
-                                            "Carefully inspect this uploaded tax document before responding. If it is a W-2, prioritize exact extraction of the key visible values and do not guess any unclear field.",
+                                            "Continue the current conversation naturally. Do not reintroduce yourself or restart the flow. Carefully inspect this uploaded tax document before responding. If it is a W-2, prioritize exact extraction of the key visible values and do not guess any unclear field.",
                                         )
                                     ),
                                 ],
