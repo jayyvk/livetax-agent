@@ -1,0 +1,117 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(0.985 0.002 95);
+  --foreground: oklch(0.18 0.01 260);
+  --card: oklch(1 0 0 / 0.68);
+  --card-foreground: oklch(0.18 0.01 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.01 260);
+  --primary: oklch(0.2 0.01 260);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.24 0.01 260);
+  --secondary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.96 0.003 95);
+  --muted-foreground: oklch(0.5 0.01 260);
+  --accent: oklch(0.95 0.01 240);
+  --accent-foreground: oklch(0.2 0.01 260);
+  --destructive: oklch(0.58 0.22 28);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.88 0.003 95);
+  --input: oklch(0.88 0.003 95);
+  --ring: oklch(0.72 0.11 228);
+  --radius: 1rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background-color: #fbfaf6;
+  background-image: radial-gradient(circle, rgba(20, 20, 20, 0.11) 1px, transparent 1.2px);
+  background-size: 24px 24px;
+  color: var(--foreground);
+  font-family: "JetBrains Mono", "SFMono-Regular", "SF Mono", Consolas, monospace;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+.livetax-transcript {
+  --secondary: oklch(0.22 0.01 260);
+  --secondary-foreground: oklch(0.98 0 0);
+  --foreground: oklch(0.18 0.01 260);
+  --muted-foreground: oklch(0.58 0.01 260);
+}
+
+.livetax-transcript [data-testid="conversation-content"] {
+  padding-inline: 0;
+}
+
+.livetax-transcript .is-assistant {
+  max-width: min(92%, 40rem);
+}
+
+.livetax-transcript .is-assistant > div {
+  padding: 0;
+  background: transparent;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.livetax-transcript .is-user {
+  max-width: min(82%, 34rem);
+}
+
+.livetax-transcript .is-user > div {
+  border-radius: 1.15rem;
+  padding: 0.85rem 1rem;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.livetax-transcript button {
+  display: none;
+}

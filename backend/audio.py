@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+import base64
+
+
+def pcm_to_base64(data: bytes) -> str:
+    return base64.b64encode(data).decode("utf-8")
