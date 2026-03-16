@@ -2,6 +2,20 @@
 
 Voice-first Gemini Live tax assistant with a Next.js frontend and a FastAPI websocket relay backend.
 
+## Architecture
+
+```mermaid
+flowchart LR
+  U["User (Chrome)"]
+  W["Cloud Run: livetax-web<br/>Next.js frontend"]
+  R["Cloud Run: livetax-relay<br/>FastAPI WebSocket relay"]
+  V["Vertex AI Gemini Live"]
+
+  U --> W
+  W -->|"wss /ws"| R
+  R --> V
+```
+
 ## Local setup
 
 Frontend:
@@ -28,6 +42,71 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 
 The frontend expects the backend websocket at `ws://127.0.0.1:8000/ws` by default.
 
+## Cloud Run deployment
+
+Current Google docs used:
+
+- [Cloud Run deployment overview](https://cloud.google.com/run/docs/deploying)
+- [Cloud Run WebSockets](https://docs.cloud.google.com/run/docs/triggering/websockets)
+- [Vertex AI Gemini Live SDK guide](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/live-api/get-started-sdk)
+
+Recommended production shape:
+
+- `livetax-relay`: backend websocket relay on Cloud Run
+- `livetax-web`: frontend on Cloud Run
+
+### 1. One-time Google Cloud setup
+
+```bash
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable run.googleapis.com aiplatform.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+gcloud auth application-default login
+```
+
+Create a backend service account and grant Vertex access:
+
+```bash
+gcloud iam service-accounts create livetax-relay --display-name="LiveTax Relay"
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="serviceAccount:livetax-relay@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+```
+
+### 2. Deploy backend first
+
+```bash
+PROJECT_ID=YOUR_PROJECT_ID \
+REGION=us-central1 \
+SERVICE_ACCOUNT=livetax-relay@YOUR_PROJECT_ID.iam.gserviceaccount.com \
+ALLOWED_ORIGINS=https://YOUR_WEB_URL \
+bash deployment/deploy-backend.sh
+```
+
+After deploy, note the backend HTTPS URL and convert it to websocket form:
+
+`https://livetax-relay-xxxxx.run.app` -> `wss://livetax-relay-xxxxx.run.app/ws`
+
+### 3. Deploy frontend second
+
+```bash
+PROJECT_ID=YOUR_PROJECT_ID \
+REGION=us-central1 \
+BACKEND_URL=wss://YOUR_BACKEND_RUN_URL/ws \
+bash deployment/deploy-web.sh
+```
+
+### 4. Update backend allowed origins
+
+After the frontend URL exists, redeploy the backend with:
+
+```bash
+PROJECT_ID=YOUR_PROJECT_ID \
+REGION=us-central1 \
+SERVICE_ACCOUNT=livetax-relay@YOUR_PROJECT_ID.iam.gserviceaccount.com \
+ALLOWED_ORIGINS=https://YOUR_WEB_RUN_URL \
+bash deployment/deploy-backend.sh
+```
+
 ## Required environment
 
 Backend:
@@ -39,7 +118,7 @@ Backend:
 
 Frontend:
 
-- `NEXT_PUBLIC_BACKEND_WS_URL` optional, defaults to `ws://127.0.0.1:8000/ws`
+- `BACKEND_WS_URL` optional, defaults to `ws://127.0.0.1:8000/ws`
 
 ## Current architecture
 

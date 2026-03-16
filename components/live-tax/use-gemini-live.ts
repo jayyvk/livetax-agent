@@ -27,8 +27,6 @@ type ServerMessage =
   | { type: "error"; message: string; code?: string }
   | { type: "log"; event: string; data?: unknown };
 
-const WS_URL =
-  process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? "ws://127.0.0.1:8000/ws";
 const AUDIO_SAMPLE_RATE = 16_000;
 const PLAYBACK_SAMPLE_RATE = 24_000;
 const SYSTEM_INSTRUCTION = `You are LiveTax Agent, a calm voice-first tax copilot helping the user complete IRS Form 1040.
@@ -168,7 +166,7 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export function useGeminiLive(): GeminiLiveState {
+export function useGeminiLive(wsUrl: string): GeminiLiveState {
   const [agentState, setAgentState] = useState<AgentState>("connecting");
   const [messages, setMessages] = useState<ReceivedMessage[]>([]);
   const [connected, setConnected] = useState(false);
@@ -322,7 +320,7 @@ export function useGeminiLive(): GeminiLiveState {
   }, [log, scheduleAudioChunk, send]);
 
   useEffect(() => {
-    const socket = new WebSocket(WS_URL);
+    const socket = new WebSocket(wsUrl);
     wsRef.current = socket;
     setAgentState("connecting");
 
@@ -371,7 +369,7 @@ export function useGeminiLive(): GeminiLiveState {
         window.clearInterval(frameIntervalRef.current);
       }
     };
-  }, [handleServerMessage, log, send]);
+  }, [handleServerMessage, log, send, wsUrl]);
 
   const sendText = useCallback((text: string) => {
     if (!text.trim()) {

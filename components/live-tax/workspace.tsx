@@ -6,7 +6,7 @@ import { AgentChatTranscript } from "@/components/agents-ui/agent-chat-transcrip
 import { useGeminiLive } from "@/components/live-tax/use-gemini-live";
 import { cn } from "@/lib/utils";
 
-export function LiveTaxWorkspace() {
+export function LiveTaxWorkspace({ wsUrl }: { wsUrl: string }) {
   const [composerValue, setComposerValue] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -21,7 +21,7 @@ export function LiveTaxWorkspace() {
     microphoneEnabled,
     toggleWorkspaceShare,
     workspaceShareEnabled
-  } = useGeminiLive();
+  } = useGeminiLive(wsUrl);
 
   const handleSend = (event: FormEvent) => {
     event.preventDefault();
