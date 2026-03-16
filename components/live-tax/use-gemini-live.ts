@@ -29,8 +29,6 @@ type ServerMessage =
 
 const AUDIO_SAMPLE_RATE = 16_000;
 const PLAYBACK_SAMPLE_RATE = 24_000;
-const INTERRUPT_RMS_THRESHOLD = 0.018;
-const INTERRUPT_DEBOUNCE_MS = 900;
 const SYSTEM_INSTRUCTION = `You are LiveTax Agent, a voice-first tax copilot helping with Form 1040.
 
 Keep the conversation natural and concise. Do not restart or reintroduce yourself when a new document appears.
@@ -38,6 +36,14 @@ Keep the conversation natural and concise. Do not restart or reintroduce yoursel
 Handle brief small talk naturally when the user starts casually, then guide the conversation back to the tax task.
 
 Use uploaded W-2s, PDFs, and the live workspace view as visual evidence. If a tax value is unclear, say so instead of guessing.
+
+Be conservative when judging whether something on the form is correct. Do not automatically say "yes" or "that looks right" unless the visible evidence is actually clear.
+
+If the user asks whether a visible edit is correct:
+- verify only what is actually visible
+- if the field is ambiguous, incomplete, blurry, or partly off-screen, say you cannot confirm yet
+- if an address looks malformed, incomplete, or obviously inconsistent, say it may be incorrect and explain why briefly
+- prefer "I can't verify that yet" over false confidence
 
 Help the user understand what they are looking at, whether a visible edit seems correct, and what to do next.
 
@@ -114,21 +120,6 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-function calculatePcmRms(bytes: Uint8Array) {
-  const samples = new Int16Array(bytes.buffer);
-  if (!samples.length) {
-    return 0;
-  }
-
-  let sum = 0;
-  for (let i = 0; i < samples.length; i += 1) {
-    const normalized = samples[i] / 32768;
-    sum += normalized * normalized;
-  }
-
-  return Math.sqrt(sum / samples.length);
-}
-
 function base64ToUint8(base64: string) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -178,8 +169,6 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
   const outputMessageIdRef = useRef<string | null>(null);
   const microphoneAutostartedRef = useRef(false);
   const visibleAssistantTurnRef = useRef(false);
-  const agentStateRef = useRef<AgentState>("connecting");
-  const lastInterruptAtRef = useRef(0);
 
   const log = useCallback((entry: string) => {
     setDebugLog((current) =>
@@ -233,35 +222,6 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       log("audio playback decode failed");
     }
   }, [log]);
-
-  const clearPlaybackQueue = useCallback(() => {
-    const ctx = playbackContextRef.current;
-    if (ctx) {
-      try {
-        void ctx.suspend();
-      } catch {
-        // ignore
-      }
-      void ctx.close().catch(() => undefined);
-    }
-    playbackContextRef.current = null;
-    nextStartTimeRef.current = 0;
-  }, []);
-
-  const interruptAssistant = useCallback(() => {
-    const now = Date.now();
-    if (now - lastInterruptAtRef.current < INTERRUPT_DEBOUNCE_MS) {
-      return;
-    }
-
-    lastInterruptAtRef.current = now;
-    clearPlaybackQueue();
-    outputMessageIdRef.current = null;
-    visibleAssistantTurnRef.current = false;
-    setAgentState("listening");
-    send({ type: "input.interrupt" });
-    log("interrupt sent");
-  }, [clearPlaybackQueue, log, send]);
 
   const handleServerMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
@@ -339,10 +299,6 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
   }, [log, scheduleAudioChunk, send]);
 
   useEffect(() => {
-    agentStateRef.current = agentState;
-  }, [agentState]);
-
-  useEffect(() => {
     const socket = new WebSocket(wsUrl);
     wsRef.current = socket;
     setAgentState("connecting");
@@ -387,12 +343,12 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
       audioContextRef.current?.close().catch(() => undefined);
-      clearPlaybackQueue();
+      playbackContextRef.current?.close().catch(() => undefined);
       if (frameIntervalRef.current !== null) {
         window.clearInterval(frameIntervalRef.current);
       }
     };
-  }, [clearPlaybackQueue, handleServerMessage, log, send, wsUrl]);
+  }, [handleServerMessage, log, send, wsUrl]);
 
   const sendText = useCallback((text: string) => {
     if (!text.trim()) {
@@ -480,16 +436,9 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       const workletNode = new AudioWorkletNode(ctx, "pcm-processor");
       workletNodeRef.current = workletNode;
       workletNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-        const bytes = new Uint8Array(event.data);
-        const rms = calculatePcmRms(bytes);
-
-        if (agentStateRef.current === "speaking" && rms >= INTERRUPT_RMS_THRESHOLD) {
-          interruptAssistant();
-        }
-
         send({
           type: "input.audio",
-          audio: bytesToBase64(bytes)
+          audio: bytesToBase64(new Uint8Array(event.data))
         });
       };
 
@@ -502,7 +451,7 @@ export function useGeminiLive(wsUrl: string): GeminiLiveState {
       setError("Failed to start microphone capture.");
       log("microphone start failed");
     }
-  }, [interruptAssistant, log, microphoneEnabled, send]);
+  }, [log, microphoneEnabled, send]);
 
   useEffect(() => {
     if (!connected || microphoneEnabled || microphoneAutostartedRef.current) {
